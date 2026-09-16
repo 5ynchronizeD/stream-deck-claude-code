@@ -21,6 +21,18 @@ export type TerminalHint = {
 	tty?: string;
 	ppid?: string;
 	windowId?: string;
+	/** Windows Terminal per-tab/pane session id (env `WT_SESSION`). Not
+	 *  currently actionable — Windows Terminal has no scriptable "focus this
+	 *  tab" API — but free to collect now for a future tab-level focus tier. */
+	wtSession?: string;
+	/** Windows only: PID of the nearest process ancestor that owns a visible
+	 *  top-level window, resolved by the bridge at hook time (by click time
+	 *  the bridge's own short-lived process, and its immediate shell parent,
+	 *  are already dead). */
+	resolvedHostPid?: number;
+	/** Win32 FILETIME (decimal string) of resolvedHostPid's creation, used to
+	 *  detect PID reuse between hook time and click time before focusing. */
+	resolvedHostPidCreatedAt?: string;
 };
 
 export type Session = {

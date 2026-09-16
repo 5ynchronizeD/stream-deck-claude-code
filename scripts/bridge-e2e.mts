@@ -7,6 +7,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 const sandbox = await mkdtemp(join(tmpdir(), "sd-cc-e2e-"));
 process.env.HOME = sandbox;
+// node's os.homedir() reads USERPROFILE (not HOME) on win32.
+process.env.USERPROFILE = sandbox;
 
 const { SessionStore } = await import("../src/state.js");
 const { startServer } = await import("../src/server.js");
@@ -34,7 +36,12 @@ await new Promise<void>((resolve, reject) => {
     TERM_PROGRAM: "iTerm.app",
     ITERM_SESSION_ID: "w0t0p0:DEADBEEF-FEED-FACE-CAFE-1234567890AB",
   };
-  const p = spawn(bridgeShPath, [], { stdio: ["pipe", "inherit", "inherit"], env });
+  // Windows can't exec a .sh file directly (no shebang support) — run it
+  // through bash explicitly, same as Claude Code itself does when it
+  // invokes a command-type hook on win32.
+  const p = process.platform === "win32"
+    ? spawn("bash", [bridgeShPath], { stdio: ["pipe", "inherit", "inherit"], env })
+    : spawn(bridgeShPath, [], { stdio: ["pipe", "inherit", "inherit"], env });
   p.stdin.end(fakeEvent);
   p.on("close", (c) => (c === 0 ? resolve() : reject(new Error("bridge exit " + c))));
 });

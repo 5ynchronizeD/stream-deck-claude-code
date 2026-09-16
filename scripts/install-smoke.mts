@@ -7,6 +7,9 @@ import { join } from "node:path";
 
 const sandbox = await mkdtemp(join(tmpdir(), "sd-cc-"));
 process.env.HOME = sandbox;
+// node's os.homedir() reads USERPROFILE (not HOME) on win32 — set both so
+// the sandbox actually takes effect on every platform.
+process.env.USERPROFILE = sandbox;
 console.log("sandbox:", sandbox);
 
 // Seed an existing settings.json with an unrelated hook so we can verify
@@ -47,9 +50,25 @@ for (const ev of allEvents) {
 
 const sh = await readFile(bridgeShPath, "utf8");
 assert(sh.includes("STREAMDECK_CC_TTY"), "shell bridge should capture tty");
-assert(sh.includes(bridgePyPath), "shell bridge should reference python file");
+// On win32 the path is rewritten to forward slashes (Git Bash eats raw
+// backslashes) so it won't match bridgePyPath verbatim — check by basename.
+assert(sh.includes("stream-deck-bridge.py"), "shell bridge should reference python file");
+if (process.platform === "win32") {
+	const execLine = sh.split("\n").find((l) => l.startsWith("exec ")) ?? "";
+	assert(!execLine.includes("/usr/bin/python3"), "win32 must not hardcode the Unix python3 path: " + execLine);
+	// Only the *script path* argument (the second quoted token) needs forward
+	// slashes — Git Bash reads it as a filename to open, where a raw
+	// backslash is misparsed as an escape char. The interpreter path (first
+	// token, e.g. 'C:\Program Files\...\python.exe') is passed to exec as an
+	// opaque single-quoted argument and is fine with real backslashes.
+	const scriptArg = execLine.match(/'([^']*)'\s*$/)?.[1] ?? "";
+	assert(scriptArg.endsWith("stream-deck-bridge.py"), "could not locate script path arg in: " + execLine);
+	assert(!scriptArg.includes("\\"), "win32 script path arg must use forward slashes: " + scriptArg);
+}
 const py = await readFile(bridgePyPath, "utf8");
 assert(py.includes("ITERM_SESSION_ID"), "python bridge should forward ITERM_SESSION_ID");
+assert(py.includes("WT_SESSION"), "python bridge should forward WT_SESSION");
+assert(py.includes("_win32_host_pid"), "python bridge should include the win32 ancestry resolver");
 assert(py.includes("13427"), "python bridge should reference port");
 
 // Running install twice should be idempotent.

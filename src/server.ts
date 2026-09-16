@@ -16,6 +16,9 @@ type HookPayload = {
 	reason?: string;
 	stop_reason?: string;
 	_env?: Record<string, string | undefined>;
+	/** Windows only: bridge-resolved focus target, see state.ts's
+	 *  TerminalHint.resolvedHostPid doc comment. */
+	_win32?: { hostPid?: number; hostPidCreatedAt?: string };
 };
 
 function readBody(req: IncomingMessage): Promise<string> {
@@ -48,6 +51,7 @@ function pickHint(env: Record<string, string | undefined> | undefined): Terminal
 	if (env.TTY) out.tty = env.TTY;
 	if (env.PPID) out.ppid = env.PPID;
 	if (env.WINDOWID) out.windowId = env.WINDOWID;
+	if (env.WT_SESSION) out.wtSession = env.WT_SESSION;
 	return out;
 }
 
@@ -174,6 +178,8 @@ function handleEvent(store: SessionStore, payload: HookPayload, logger: Logger):
 	}
 	const cwd = payload.cwd ?? "";
 	const hint = pickHint(payload._env);
+	if (payload._win32?.hostPid) hint.resolvedHostPid = payload._win32.hostPid;
+	if (payload._win32?.hostPidCreatedAt) hint.resolvedHostPidCreatedAt = payload._win32.hostPidCreatedAt;
 
 	if (payload.hook_event_name === "SessionEnd") {
 		// User ^C'd or otherwise quit — drop the tile back to the empty state.
