@@ -1,6 +1,4 @@
 import { EventEmitter } from "node:events";
-import { homedir } from "node:os";
-import { basename } from "node:path";
 
 export type SessionState =
 	| "idle"
@@ -91,15 +89,13 @@ function compareForPromotion(a: Session, b: Session): number {
 	return b.lastUpdate - a.lastUpdate;
 }
 
-/** Sessions started right in the home directory (no specific project folder)
- *  would otherwise all show the OS username as the label — useless for
- *  telling them apart. Fall back to a short session id in that case, so a
- *  session can still be found/identified if its window doesn't close. */
-function deriveLabel(cwd: string, id: string): string {
-	const base = basename(cwd || "");
-	if (!base || base === basename(homedir())) return id.slice(0, 8);
-	// Hand the full basename to the renderer; it owns the wrap/fit logic.
-	return base;
+/** The tile's top label is the short session id, not the project name — the
+ *  user wants to be able to find/identify a specific session (e.g. a stray
+ *  window that didn't close) unambiguously, which a project name can't do
+ *  when multiple sessions share one project. The project name/task context
+ *  still shows up via the salient-word subtitle (see render.ts). */
+function deriveLabel(id: string): string {
+	return id.slice(0, 8);
 }
 
 export class SessionStore extends EventEmitter {
@@ -171,7 +167,7 @@ export class SessionStore extends EventEmitter {
 			s = {
 				id,
 				cwd,
-				label: deriveLabel(cwd, id),
+				label: deriveLabel(id),
 				state: "idle",
 				lastEvent: "SessionStart",
 				startedAt: Date.now(),

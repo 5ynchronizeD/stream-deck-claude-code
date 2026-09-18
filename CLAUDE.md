@@ -4,7 +4,7 @@ Project memory for future Claude Code sessions in this repo.
 
 ## What this is
 
-A **Stream Deck plugin** that shows live status for every running Claude Code session — one tile per session, color-coded state, project name, press-to-focus the iTerm / VS Code / Terminal window. Distributable via Elgato Marketplace.
+A **Stream Deck plugin** that shows live status for every running Claude Code session — one tile per session, color-coded state, short session id, press-to-focus the iTerm / VS Code / Terminal window. Distributable via Elgato Marketplace.
 
 Plugin UUID: `com.virtuis.claudecode`. Action UUID: `com.virtuis.claudecode.session`.
 
@@ -36,7 +36,7 @@ Claude Code  ──►  ~/.claude/hooks/stream-deck-bridge.sh    (captures $(tty
 - `src/plugin.ts` — entry. Register action → connect → hydrate from `globalSettings` → start HTTP server → bind action → wire persistence.
 - `src/server.ts` — HTTP server. Maps hook events to state transitions. Logs every event.
 - `src/state.ts` — `SessionStore` (EventEmitter). `upsert / apply / remove / serialize / hydrate`.
-- `src/render.ts` — SVG → data-URI. Renders the project label *inside* the SVG (Stream Deck's own title rendering is too small to be useful).
+- `src/render.ts` — SVG → data-URI. Renders the label *inside* the SVG (Stream Deck's own title rendering is too small to be useful).
 - `src/focus.ts` — platform dispatch (`darwin` → `focus-mac.ts`, `win32` → `focus-windows.ts`).
 - `src/focus-mac.ts` — macOS AppleScript dispatch. iTerm by `unique id` from `ITERM_SESSION_ID`, Terminal.app by `tty`, VS Code/Cursor by window title containing `basename(cwd)`.
 - `src/focus-windows.ts` — Windows focus. Primary path: activate `terminal.resolvedHostPid` (set by the bridge, see below) via `WScript.Shell.AppActivate`, after revalidating it hasn't been PID-recycled since the hook fired. Fallback: VS Code/Cursor by `MainWindowTitle` containing `basename(cwd)`. Last resort: `explorer.exe <cwd>`.
@@ -135,6 +135,7 @@ Submission flow: register a Maker ID with Elgato, then follow [the submission gu
 - **Don't ask the user to paste log output.** Read the logs yourself, reload the plugin yourself.
 - **Simple > clever.** I tried sticky slot ownership; user pushed back hard. Listen to the simpler intuition.
 - **Don't paste user/business data into tracked files.** Test fixtures use placeholder project names (`alpha`, `beta`, `api-client`). Real session titles, project basenames, and internal product names belong only in ad-hoc debugging, never in committed source.
+- **Top label is the short session id, not the project name** (changed 2026-09-18, at the user's explicit request — asked twice, second time to confirm scope: "always session id at top for every session," not just as a home-dir-only fallback). The project name is intentionally NOT shown anywhere else on the tile — the user chose that trade-off knowing it. Don't reintroduce project-name-as-top-label without checking; the point is unambiguously finding/identifying one specific session (e.g. a stray window that didn't close), which a project name can't do once multiple sessions share a project.
 
 ## UX rules — minimum sizes & weights
 
@@ -142,21 +143,21 @@ Stream Deck tiles render at 144×144 viewBox. These minimums are non-negotiable;
 
 | Element | Font size (min) | Weight | Color | Notes |
 |---|---|---|---|---|
-| Project name, single line (≤9 chars) | **26pt** | 700 bold | `#ffffff` | bigger sizes for shorter names — see `pickSingleLineSize` |
-| Project name, single line (≤13 chars) | **18pt** | 700 bold | `#ffffff` | textLength squeeze if estimated width > 132px |
-| Project name, two-line wrap (each line) | **14pt** | 700 bold | `#ffffff` | wraps on a `-/_/.` separator near the middle; keep separator visible |
-| Salient subtitle (middle) | **24pt** | 300 light | `#cdd2dc` | truncate at 10 chars with `…`, NOT smaller font |
+| Top label (session id), single line (≤9 chars) | **26pt** | 700 bold | `#ffffff` | bigger sizes for shorter labels — see `pickSingleLineSize` |
+| Top label, single line (≤13 chars) | **18pt** | 700 bold | `#ffffff` | scrolls instead of squeezing if estimated width > 132px |
+| Top label, two-line wrap (each line) | **14pt** | 700 bold | `#ffffff` | wraps on a `-/_/.` separator near the middle; keep separator visible. Rare now that the label is always a short id, but the code path stays for anything longer. |
+| Salient subtitle (middle) | **24pt** | 300 light | `#cdd2dc` | scrolls instead of truncating with `…` if estimated width > 132px |
 | Status caption (bottom band) | **26pt** | 700 bold | per-theme | marquee scroll when text overflows 132px, NOT shrink |
 
 **Iron rules:**
 
 1. **"Lighter" means font weight, never font size.** When the user says lighter, change `font-weight`. Never shrink size as a response to that feedback.
 2. **Bigger > clever.** When in doubt, go up a tier. Repeated feedback has been "still too small".
-3. **No silent truncation in the data layer.** The renderer owns fit. `deriveLabel` returns the full basename; never pre-cut with `…`.
-4. **Overflow handling**: for dynamic content (tool names, captions during `working`), scroll horizontally — see `paintBand` marquee logic. For project labels/names: prefer a two-line wrap on a natural `-/_/.` separator (still fully static and readable); if that's not available or not big enough, scroll horizontally instead of squeezing letters together or breaking mid-word — see `paintName`/`marqueeName`/`nameWillScroll`. (Changed 2026-09-18 at the user's request — squeezing read as a clipped/cut-off word. Don't reintroduce `textLength` squeeze as the long-label fallback for names.) Don't add a "..." for content the renderer should size itself.
-5. **Animation is polling-only.** `setImage` does not play animated GIFs at runtime. Don't waste time on `@resvg/resvg-js` + `gifenc` — it's been tried, it doesn't work. The `animationTick` in `session-action.ts` runs every `ANIM_TICK_MS` (defined in `render.ts`; currently 50ms / 20fps) with a brightness skip-epsilon to keep RPC traffic low. Marquee-scrolling captions bypass the dedup so they don't freeze during brightness plateaus.
+3. **No silent truncation in the data layer.** The renderer owns fit. `deriveLabel` returns the short session id, never pre-cut with `…`.
+4. **Overflow handling**: for dynamic content (tool names, captions during `working`, the salient subtitle), scroll horizontally rather than truncate with `…` or squeeze with `textLength` — see `paintBand`/`paintSalient` marquee logic and `captionWillScroll`/`salientWillScroll`. For the top label specifically: prefer a two-line wrap on a natural `-/_/.` separator (still fully static and readable) if one exists and is bigger than the single-line fit; otherwise scroll — see `paintName`/`marqueeName`/`nameWillScroll`. (Changed 2026-09-18 at the user's request — squeezing/truncating read as a clipped/cut-off word. Don't reintroduce `textLength` squeeze or `…` truncation as the long-content fallback for the top label or the salient subtitle.) Don't add a "..." for content the renderer should size itself.
+5. **Animation is polling-only.** `setImage` does not play animated GIFs at runtime. Don't waste time on `@resvg/resvg-js` + `gifenc` — it's been tried, it doesn't work. The `animationTick` in `session-action.ts` runs every `ANIM_TICK_MS` (defined in `render.ts`; currently 50ms / 20fps) with a brightness skip-epsilon to keep RPC traffic low. Any marquee-scrolling element (caption, top label, or salient subtitle) bypasses that dedup AND the `shouldAnimate(state)` gate — an `idle`/`done` tile with a long label still needs to redraw every tick, or its marquee freezes.
 6. **The empty-tile dot was removed for consistency** with active tiles. Don't add it back without checking — the user explicitly flagged the inconsistency.
-7. **Project name is top-anchored**, not centered in the upper region. `NAME_TOP=6`, baseline = `NAME_TOP + fontSize * 0.82`. Don't center; user has called this out.
+7. **Top label is top-anchored**, not centered in the upper region. `NAME_TOP=6`, baseline = `NAME_TOP + fontSize * 0.82`. Don't center; user has called this out.
 
 ## Known gotchas
 

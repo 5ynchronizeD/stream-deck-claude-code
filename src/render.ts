@@ -32,7 +32,6 @@ const TILE_MAX_TEXT_WIDTH = 132;
 const NAME_WEIGHT = 700;
 const SALIENT_BASELINE = 82;
 const SALIENT_FONT = 24;
-const SALIENT_MAX_CHARS = 10;
 const SALIENT_WEIGHT = 300;
 const SALIENT_COLOR = "#cdd2dc";
 
@@ -170,17 +169,47 @@ export function salientWord(title: string | undefined, project: string): string 
 	);
 }
 
-function truncate(s: string, max: number): string {
-	if (s.length <= max) return s;
-	return s.slice(0, Math.max(1, max - 1)) + "…";
+/** True if the salient-word subtitle is too wide for one line at
+ *  `SALIENT_FONT`, so `paintSalient` will scroll it instead of cutting it
+ *  short with `…`. Used by the animation loop the same way `nameWillScroll`
+ *  and `captionWillScroll` are. */
+export function salientWillScroll(word: string | undefined): boolean {
+	if (!word) return false;
+	return estimateWidthPx(word, SALIENT_FONT) > TILE_MAX_TEXT_WIDTH;
 }
 
-function paintSalient(word: string | undefined): string {
+const SALIENT_SCROLL_PX_PER_TICK = 2;
+const SALIENT_LOOP_GAP = 32;
+
+function marqueeSalient(word: string, phase: number): string {
+	const width = estimateWidthPx(word, SALIENT_FONT);
+	const period = width + SALIENT_LOOP_GAP;
+	const offset = (phase * SALIENT_SCROLL_PX_PER_TICK) % period;
+	const clipId = `sl_${SALIENT_BASELINE}`;
+	const y0 = SALIENT_BASELINE - SALIENT_FONT;
+	return `
+		<defs>
+			<clipPath id="${clipId}">
+				<rect x="0" y="${y0}" width="144" height="${Math.round(SALIENT_FONT * 1.3)}"/>
+			</clipPath>
+		</defs>
+		<g clip-path="url(#${clipId})">
+			<text x="${-offset + 8}" y="${SALIENT_BASELINE}" text-anchor="start"
+			      font-family="${FONT_STACK}" font-size="${SALIENT_FONT}" font-weight="${SALIENT_WEIGHT}"
+			      fill="${SALIENT_COLOR}" opacity="0.95">${esc(word)}</text>
+			<text x="${-offset + 8 + period}" y="${SALIENT_BASELINE}" text-anchor="start"
+			      font-family="${FONT_STACK}" font-size="${SALIENT_FONT}" font-weight="${SALIENT_WEIGHT}"
+			      fill="${SALIENT_COLOR}" opacity="0.95">${esc(word)}</text>
+		</g>
+	`;
+}
+
+function paintSalient(word: string | undefined, phase: number): string {
 	if (!word) return "";
-	const text = truncate(word, SALIENT_MAX_CHARS);
+	if (salientWillScroll(word)) return marqueeSalient(word, phase);
 	return `<text x="72" y="${SALIENT_BASELINE}" text-anchor="middle" font-family="${FONT_STACK}"
 	             font-size="${SALIENT_FONT}" font-weight="${SALIENT_WEIGHT}"
-	             fill="${SALIENT_COLOR}" opacity="0.95">${esc(text)}</text>`;
+	             fill="${SALIENT_COLOR}" opacity="0.95">${esc(word)}</text>`;
 }
 
 /** True if the name doesn't fit as a clean single line or a two-line wrap on
@@ -389,6 +418,13 @@ export function renderEmpty(hooksMissing = false): string {
 	`));
 }
 
+/** The salient-word subtitle for a session — exported so the animation loop
+ *  can check `salientWillScroll` on it without recomputing `salientWord`
+ *  differently in two places. */
+export function subtitleFor(session: Session): string {
+	return salientWord(session.aiTitle, session.label);
+}
+
 export function renderSession(session: Session, phase = 0, now = Date.now()): { image: string; title: string } {
 	const t = THEMES[session.state] ?? THEMES.idle;
 	const caption =
@@ -399,14 +435,14 @@ export function renderSession(session: Session, phase = 0, now = Date.now()): { 
 	const brightness = brightnessFor(session.state, phase);
 	const bandColor = dim(t.band, brightness);
 	const captionFg = brightness < 0.7 ? dim(t.captionFg, 0.55 + brightness * 0.45) : t.captionFg;
-	const subtitle = salientWord(session.aiTitle, session.label);
+	const subtitle = subtitleFor(session);
 	// Marquee is reserved for `working` with a long tool name. Other overflow
 	// (e.g. `ready (12m)`) gets squeezed instead so static text doesn't scroll.
 	const allowMarquee = session.state === "working";
 	const inner = `
 		<rect width="144" height="144" rx="12" fill="${t.bg}"/>
 		${paintName(session.label, phase)}
-		${paintSalient(subtitle)}
+		${paintSalient(subtitle, phase)}
 		${paintBand(caption, hint, bandColor, captionFg, phase, allowMarquee)}
 	`;
 	return { image: svgToDataUri(svgWrap(inner)), title: "" };

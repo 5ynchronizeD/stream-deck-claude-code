@@ -38,7 +38,10 @@ assert(list.length === 2, "expected 2 sessions");
 assert(list[0].state === "done", `s1 should be done, was ${list[0].state}`);
 assert(list[1].state === "waiting", `s2 should be waiting, was ${list[1].state}`);
 assert(list[0].lastTool === "Edit", `s1 should have lastTool=Edit, was ${list[0].lastTool}`);
-assert(list[1].label === "another-project", `unexpected label: ${list[1].label}`);
+// Label is the short session id now, not a project name — a specific
+// session must be findable/identifiable even when it shares a project with
+// others (see state.ts's deriveLabel doc comment).
+assert(list[1].label === "s2", `unexpected label: ${list[1].label}`);
 
 // Render check: ensure renderEmpty + renderSession produce valid data URIs.
 const { renderEmpty, renderSession } = await import("../src/render.js");
