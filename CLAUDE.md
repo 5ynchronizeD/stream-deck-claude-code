@@ -44,7 +44,7 @@ Claude Code  ──►  ~/.claude/hooks/stream-deck-bridge.sh    (captures $(tty
 - `src/actions/session-action.ts` — the single SingletonAction. Handles `onWillAppear`, `onKeyDown`, `onSendToPlugin` (PI messages). Sorts physical tiles by `(device, row, column)` and pairs them with `store.list()[i]` — sessions pack into the leftmost/topmost free tiles in arrival order.
 - `com.virtuis.claudecode.sdPlugin/manifest.json` — plugin manifest.
 - `com.virtuis.claudecode.sdPlugin/ui/session.html` — Property Inspector. Uses `sdpi-components` from CDN. Talks to plugin via `sendToPlugin({event: "installHooks" | "uninstallHooks" | "getHookStatus"})`.
-- `scripts/{smoke,install-smoke,bridge-e2e,salient-smoke}.mts` — `npm test` runs all four.
+- `scripts/{smoke,install-smoke,bridge-e2e}.mts` — `npm test` runs all three.
 - `src/strings.ts` — every user-facing string rendered into a tile, in one object.
 - `src/transcript.ts` — read the tail of a session's transcript JSONL for `aiTitle`, last prompt, and `User rejected tool use` markers.
 - `scripts/install-hooks.mjs` — standalone CLI alternative to the PI install button.
@@ -86,7 +86,7 @@ The user explicitly rejected sticky slot ownership ("when session ends, that's w
 npm install
 npm run build       # rollup → com.virtuis.claudecode.sdPlugin/bin/plugin.js
 npm run watch       # build on change
-npm test            # smoke + install + bridge-e2e + salient
+npm test            # smoke + install + bridge-e2e
 ```
 
 First-time setup for local dev — symlink the plugin folder into Stream Deck's plugin directory so the Stream Deck app finds it:
@@ -136,6 +136,7 @@ Submission flow: register a Maker ID with Elgato, then follow [the submission gu
 - **Simple > clever.** I tried sticky slot ownership; user pushed back hard. Listen to the simpler intuition.
 - **Don't paste user/business data into tracked files.** Test fixtures use placeholder project names (`alpha`, `beta`, `api-client`). Real session titles, project basenames, and internal product names belong only in ad-hoc debugging, never in committed source.
 - **Top label is the short session id, not the project name** (changed 2026-09-18, at the user's explicit request — asked twice, second time to confirm scope: "always session id at top for every session," not just as a home-dir-only fallback). The project name is intentionally NOT shown anywhere else on the tile — the user chose that trade-off knowing it. Don't reintroduce project-name-as-top-label without checking; the point is unambiguously finding/identifying one specific session (e.g. a stray window that didn't close), which a project name can't do once multiple sessions share a project.
+- **Subtitle shows the full `aiTitle`, not a single extracted keyword** (also 2026-09-18, same session as above). There used to be a `salientWord()` picker (verb-stripping, stopword/modifier filtering, ~60 lines) that reduced a title like "Language Switch" down to one word ("Language") — the user's actual complaint wasn't overflow, it was that the picker was throwing away words they wanted to see. Removed entirely rather than patched; don't reintroduce a "pick one word" reduction — if it doesn't fit, scroll it (see rule 4 below), don't shrink the information.
 
 ## UX rules — minimum sizes & weights
 
@@ -146,7 +147,7 @@ Stream Deck tiles render at 144×144 viewBox. These minimums are non-negotiable;
 | Top label (session id), single line (≤9 chars) | **26pt** | 700 bold | `#ffffff` | bigger sizes for shorter labels — see `pickSingleLineSize` |
 | Top label, single line (≤13 chars) | **18pt** | 700 bold | `#ffffff` | scrolls instead of squeezing if estimated width > 132px |
 | Top label, two-line wrap (each line) | **14pt** | 700 bold | `#ffffff` | wraps on a `-/_/.` separator near the middle; keep separator visible. Rare now that the label is always a short id, but the code path stays for anything longer. |
-| Salient subtitle (middle) | **24pt** | 300 light | `#cdd2dc` | scrolls instead of truncating with `…` if estimated width > 132px |
+| Subtitle (middle, full `aiTitle`) | **24pt** | 300 light | `#cdd2dc` | scrolls instead of truncating with `…` if estimated width > 132px |
 | Status caption (bottom band) | **26pt** | 700 bold | per-theme | marquee scroll when text overflows 132px, NOT shrink |
 
 **Iron rules:**
@@ -154,8 +155,8 @@ Stream Deck tiles render at 144×144 viewBox. These minimums are non-negotiable;
 1. **"Lighter" means font weight, never font size.** When the user says lighter, change `font-weight`. Never shrink size as a response to that feedback.
 2. **Bigger > clever.** When in doubt, go up a tier. Repeated feedback has been "still too small".
 3. **No silent truncation in the data layer.** The renderer owns fit. `deriveLabel` returns the short session id, never pre-cut with `…`.
-4. **Overflow handling**: for dynamic content (tool names, captions during `working`, the salient subtitle), scroll horizontally rather than truncate with `…` or squeeze with `textLength` — see `paintBand`/`paintSalient` marquee logic and `captionWillScroll`/`salientWillScroll`. For the top label specifically: prefer a two-line wrap on a natural `-/_/.` separator (still fully static and readable) if one exists and is bigger than the single-line fit; otherwise scroll — see `paintName`/`marqueeName`/`nameWillScroll`. (Changed 2026-09-18 at the user's request — squeezing/truncating read as a clipped/cut-off word. Don't reintroduce `textLength` squeeze or `…` truncation as the long-content fallback for the top label or the salient subtitle.) Don't add a "..." for content the renderer should size itself.
-5. **Animation is polling-only.** `setImage` does not play animated GIFs at runtime. Don't waste time on `@resvg/resvg-js` + `gifenc` — it's been tried, it doesn't work. The `animationTick` in `session-action.ts` runs every `ANIM_TICK_MS` (defined in `render.ts`; currently 50ms / 20fps) with a brightness skip-epsilon to keep RPC traffic low. Any marquee-scrolling element (caption, top label, or salient subtitle) bypasses that dedup AND the `shouldAnimate(state)` gate — an `idle`/`done` tile with a long label still needs to redraw every tick, or its marquee freezes.
+4. **Overflow handling**: for dynamic content (tool names, captions during `working`, the subtitle), scroll horizontally rather than truncate with `…` or squeeze with `textLength` — see `paintBand`/`paintSubtitle` marquee logic and `captionWillScroll`/`subtitleWillScroll`. For the top label specifically: prefer a two-line wrap on a natural `-/_/.` separator (still fully static and readable) if one exists and is bigger than the single-line fit; otherwise scroll — see `paintName`/`marqueeName`/`nameWillScroll`. (Changed 2026-09-18 at the user's request — squeezing/truncating read as a clipped/cut-off word or a lost word. Don't reintroduce `textLength` squeeze or `…` truncation as the long-content fallback for the top label or the subtitle.) Don't add a "..." for content the renderer should size itself.
+5. **Animation is polling-only.** `setImage` does not play animated GIFs at runtime. Don't waste time on `@resvg/resvg-js` + `gifenc` — it's been tried, it doesn't work. The `animationTick` in `session-action.ts` runs every `ANIM_TICK_MS` (defined in `render.ts`; currently 50ms / 20fps) with a brightness skip-epsilon to keep RPC traffic low. Any marquee-scrolling element (caption, top label, or subtitle) bypasses that dedup AND the `shouldAnimate(state)` gate — an `idle`/`done` tile with a long label still needs to redraw every tick, or its marquee freezes.
 6. **The empty-tile dot was removed for consistency** with active tiles. Don't add it back without checking — the user explicitly flagged the inconsistency.
 7. **Top label is top-anchored**, not centered in the upper region. `NAME_TOP=6`, baseline = `NAME_TOP + fontSize * 0.82`. Don't center; user has called this out.
 
@@ -180,4 +181,4 @@ Things worth revisiting:
 
 - Tile rendering at different deck sizes / device DPRs (only tested on Stream Deck Mini so far).
 - Marquee scroll speed (`CAPTION_SCROLL_PX_PER_TICK` — currently 2 at 20fps = 40px/sec; tune if needed).
-- Whether the salient-word picker (`salientWord` in `render.ts`) handles non-English titles gracefully.
+- Whether the subtitle marquee reads comfortably for non-English `aiTitle` text (right-to-left scripts, wide CJK glyphs vs. the `estimateWidthPx` heuristic tuned for Latin text).

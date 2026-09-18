@@ -7,7 +7,7 @@ import streamDeck, {
 } from "@elgato/streamdeck";
 import type { JsonValue } from "@elgato/streamdeck";
 import { focusSession } from "../focus.js";
-import { ANIM_TICK_MS, brightnessFor, captionWillScroll, nameWillScroll, renderEmpty, renderSession, salientWillScroll, shouldAnimate, subtitleFor } from "../render.js";
+import { ANIM_TICK_MS, brightnessFor, captionWillScroll, nameWillScroll, renderEmpty, renderSession, shouldAnimate, subtitleFor, subtitleWillScroll } from "../render.js";
 import type { SessionStore } from "../state.js";
 import { installHooks, isInstalled, uninstallHooks } from "../install.js";
 
@@ -152,7 +152,7 @@ export class SessionAction extends SingletonAction<Settings> {
 		for (let i = 0; i < slots.length; i++) {
 			const s = sessions[i];
 			if (!s) continue;
-			const scrolling = captionWillScroll(s) || nameWillScroll(s.label) || salientWillScroll(subtitleFor(s));
+			const scrolling = captionWillScroll(s) || nameWillScroll(s.label) || subtitleWillScroll(subtitleFor(s));
 			if (!shouldAnimate(s.state) && !scrolling) continue;
 			const slot = slots[i];
 			const brightness = brightnessFor(s.state, this.animPhase);

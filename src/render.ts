@@ -30,10 +30,10 @@ const CAPTION_FONT = 26;
 const CAPTION_BASELINE = BAND_TOP + Math.floor((BAND_HEIGHT + CAPTION_FONT * 0.7) / 2);
 const TILE_MAX_TEXT_WIDTH = 132;
 const NAME_WEIGHT = 700;
-const SALIENT_BASELINE = 82;
-const SALIENT_FONT = 24;
-const SALIENT_WEIGHT = 300;
-const SALIENT_COLOR = "#cdd2dc";
+const SUBTITLE_BASELINE = 82;
+const SUBTITLE_FONT = 24;
+const SUBTITLE_WEIGHT = 300;
+const SUBTITLE_COLOR = "#cdd2dc";
 
 // Animation tick period (ms). Smaller = smoother but more RPC traffic.
 export const ANIM_TICK_MS = 50;
@@ -110,106 +110,47 @@ function trySplitOnSeparator(label: string): { top: string; bot: string } | null
 	return null;
 }
 
-// Words to ignore when picking a salient word from an aiTitle.
-const SALIENT_VERBS = new Set([
-	"add", "audit", "build", "change", "check", "configure", "create", "debug",
-	"design", "delete", "develop", "diagnose", "do", "explore", "find", "fix",
-	"generate", "get", "help", "implement", "improve", "install", "investigate",
-	"make", "move", "port", "refactor", "remove", "rename", "replace", "research",
-	"review", "run", "set", "setup", "ship", "show", "start", "stop", "test",
-	"try", "update", "use", "write", "wire", "explain", "describe",
-]);
-const SALIENT_STOPS = new Set([
-	"a", "about", "an", "and", "are", "as", "at", "be", "but", "by", "for",
-	"from", "if", "in", "into", "is", "it", "its", "of", "on", "or", "out",
-	"over", "the", "their", "them", "to", "via", "with", "without",
-]);
-const SALIENT_MODIFIERS = new Set([
-	"all", "any", "available", "basic", "best", "better", "big", "both", "broken",
-	"common", "complex", "critical", "current", "deep", "easy", "every", "fast",
-	"few", "first", "full", "general", "good", "great", "hard", "high", "huge",
-	"important", "individual", "intermittent", "large", "last", "latest", "least",
-	"less", "little", "long", "low", "main", "many", "missing", "more", "most",
-	"much", "narrow", "new", "next", "nice", "ok", "old", "oldest", "one",
-	"previous", "primary", "ready", "real", "recent", "right", "same", "second",
-	"secondary", "several", "shallow", "short", "simple", "slow", "small", "some",
-	"special", "specific", "third", "true", "two", "useful", "various", "wide",
-	"wrong", "yet", "still", "again", "just",
-]);
-
-/** Pick one salient word from an aiTitle like "Build Stream Deck plugin for
- *  Claude Code sessions". Drops verbs / function words / weak modifiers /
- *  words already in the project label. Falls back through milder filters. */
-export function salientWord(title: string | undefined, project: string): string {
-	if (!title) return "";
-	const words = title.match(/[A-Za-z][A-Za-z0-9]*/g) ?? [];
-	const first = words[0];
-	if (!first) return "";
-	const head = SALIENT_VERBS.has(first.toLowerCase()) ? words.slice(1) : words;
-	const projectParts = new Set(
-		project.toLowerCase().split(/[-_./\s]+/).filter(Boolean),
-	);
-	const pick = (preds: ((s: string) => boolean)[]) => {
-		for (const word of head) {
-			const lc = word.toLowerCase();
-			if (preds.every((p) => p(lc))) return word;
-		}
-		return "";
-	};
-	return (
-		pick([
-			(lc) => !SALIENT_STOPS.has(lc),
-			(lc) => !SALIENT_MODIFIERS.has(lc),
-			(lc) => !projectParts.has(lc),
-		]) ||
-		pick([(lc) => !SALIENT_STOPS.has(lc), (lc) => !SALIENT_MODIFIERS.has(lc)]) ||
-		pick([(lc) => !SALIENT_STOPS.has(lc)]) ||
-		head[0] ||
-		first
-	);
-}
-
-/** True if the salient-word subtitle is too wide for one line at
- *  `SALIENT_FONT`, so `paintSalient` will scroll it instead of cutting it
+/** True if the subtitle (the full `aiTitle`) is too wide for one line at
+ *  `SUBTITLE_FONT`, so `paintSubtitle` will scroll it instead of cutting it
  *  short with `…`. Used by the animation loop the same way `nameWillScroll`
  *  and `captionWillScroll` are. */
-export function salientWillScroll(word: string | undefined): boolean {
-	if (!word) return false;
-	return estimateWidthPx(word, SALIENT_FONT) > TILE_MAX_TEXT_WIDTH;
+export function subtitleWillScroll(text: string | undefined): boolean {
+	if (!text) return false;
+	return estimateWidthPx(text, SUBTITLE_FONT) > TILE_MAX_TEXT_WIDTH;
 }
 
-const SALIENT_SCROLL_PX_PER_TICK = 2;
-const SALIENT_LOOP_GAP = 32;
+const SUBTITLE_SCROLL_PX_PER_TICK = 2;
+const SUBTITLE_LOOP_GAP = 32;
 
-function marqueeSalient(word: string, phase: number): string {
-	const width = estimateWidthPx(word, SALIENT_FONT);
-	const period = width + SALIENT_LOOP_GAP;
-	const offset = (phase * SALIENT_SCROLL_PX_PER_TICK) % period;
-	const clipId = `sl_${SALIENT_BASELINE}`;
-	const y0 = SALIENT_BASELINE - SALIENT_FONT;
+function marqueeSubtitle(text: string, phase: number): string {
+	const width = estimateWidthPx(text, SUBTITLE_FONT);
+	const period = width + SUBTITLE_LOOP_GAP;
+	const offset = (phase * SUBTITLE_SCROLL_PX_PER_TICK) % period;
+	const clipId = `sl_${SUBTITLE_BASELINE}`;
+	const y0 = SUBTITLE_BASELINE - SUBTITLE_FONT;
 	return `
 		<defs>
 			<clipPath id="${clipId}">
-				<rect x="0" y="${y0}" width="144" height="${Math.round(SALIENT_FONT * 1.3)}"/>
+				<rect x="0" y="${y0}" width="144" height="${Math.round(SUBTITLE_FONT * 1.3)}"/>
 			</clipPath>
 		</defs>
 		<g clip-path="url(#${clipId})">
-			<text x="${-offset + 8}" y="${SALIENT_BASELINE}" text-anchor="start"
-			      font-family="${FONT_STACK}" font-size="${SALIENT_FONT}" font-weight="${SALIENT_WEIGHT}"
-			      fill="${SALIENT_COLOR}" opacity="0.95">${esc(word)}</text>
-			<text x="${-offset + 8 + period}" y="${SALIENT_BASELINE}" text-anchor="start"
-			      font-family="${FONT_STACK}" font-size="${SALIENT_FONT}" font-weight="${SALIENT_WEIGHT}"
-			      fill="${SALIENT_COLOR}" opacity="0.95">${esc(word)}</text>
+			<text x="${-offset + 8}" y="${SUBTITLE_BASELINE}" text-anchor="start"
+			      font-family="${FONT_STACK}" font-size="${SUBTITLE_FONT}" font-weight="${SUBTITLE_WEIGHT}"
+			      fill="${SUBTITLE_COLOR}" opacity="0.95">${esc(text)}</text>
+			<text x="${-offset + 8 + period}" y="${SUBTITLE_BASELINE}" text-anchor="start"
+			      font-family="${FONT_STACK}" font-size="${SUBTITLE_FONT}" font-weight="${SUBTITLE_WEIGHT}"
+			      fill="${SUBTITLE_COLOR}" opacity="0.95">${esc(text)}</text>
 		</g>
 	`;
 }
 
-function paintSalient(word: string | undefined, phase: number): string {
-	if (!word) return "";
-	if (salientWillScroll(word)) return marqueeSalient(word, phase);
-	return `<text x="72" y="${SALIENT_BASELINE}" text-anchor="middle" font-family="${FONT_STACK}"
-	             font-size="${SALIENT_FONT}" font-weight="${SALIENT_WEIGHT}"
-	             fill="${SALIENT_COLOR}" opacity="0.95">${esc(word)}</text>`;
+function paintSubtitle(text: string | undefined, phase: number): string {
+	if (!text) return "";
+	if (subtitleWillScroll(text)) return marqueeSubtitle(text, phase);
+	return `<text x="72" y="${SUBTITLE_BASELINE}" text-anchor="middle" font-family="${FONT_STACK}"
+	             font-size="${SUBTITLE_FONT}" font-weight="${SUBTITLE_WEIGHT}"
+	             fill="${SUBTITLE_COLOR}" opacity="0.95">${esc(text)}</text>`;
 }
 
 /** True if the name doesn't fit as a clean single line or a two-line wrap on
@@ -418,11 +359,12 @@ export function renderEmpty(hooksMissing = false): string {
 	`));
 }
 
-/** The salient-word subtitle for a session — exported so the animation loop
- *  can check `salientWillScroll` on it without recomputing `salientWord`
- *  differently in two places. */
+/** The subtitle for a session: Claude's auto-generated title for what it's
+ *  doing, shown verbatim (not reduced to a single keyword — the user wants
+ *  to actually read it, not guess at it). Exported so the animation loop can
+ *  check `subtitleWillScroll` on the same value `renderSession` paints. */
 export function subtitleFor(session: Session): string {
-	return salientWord(session.aiTitle, session.label);
+	return session.aiTitle ?? "";
 }
 
 export function renderSession(session: Session, phase = 0, now = Date.now()): { image: string; title: string } {
@@ -442,7 +384,7 @@ export function renderSession(session: Session, phase = 0, now = Date.now()): { 
 	const inner = `
 		<rect width="144" height="144" rx="12" fill="${t.bg}"/>
 		${paintName(session.label, phase)}
-		${paintSalient(subtitle, phase)}
+		${paintSubtitle(subtitle, phase)}
 		${paintBand(caption, hint, bandColor, captionFg, phase, allowMarquee)}
 	`;
 	return { image: svgToDataUri(svgWrap(inner)), title: "" };
