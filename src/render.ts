@@ -111,12 +111,6 @@ function trySplitOnSeparator(label: string): { top: string; bot: string } | null
 	return null;
 }
 
-/** Forced midpoint split for very long labels with no separator. */
-function forceSplit(label: string): { top: string; bot: string } {
-	const cut = Math.floor(label.length / 2);
-	return { top: label.slice(0, cut), bot: label.slice(cut) };
-}
-
 // Words to ignore when picking a salient word from an aiTitle.
 const SALIENT_VERBS = new Set([
 	"add", "audit", "build", "change", "check", "configure", "create", "debug",
@@ -189,7 +183,52 @@ function paintSalient(word: string | undefined): string {
 	             fill="${SALIENT_COLOR}" opacity="0.95">${esc(text)}</text>`;
 }
 
-function paintName(label: string): string {
+/** True if the name doesn't fit as a clean single line or a two-line wrap on
+ *  a natural separator, so `paintName` will scroll it instead of squeezing
+ *  letters together or forcing a mid-word break. Used by the animation loop
+ *  to bypass the brightness-only dedup — without this, scroll position
+ *  freezes during brightness plateaus (same reason `captionWillScroll`
+ *  exists). */
+export function nameWillScroll(label: string): boolean {
+	const single = pickSingleLineSize(label);
+	const split = trySplitOnSeparator(label);
+	const wrapSize = split ? pickTwoLineSize(Math.max(split.top.length, split.bot.length)) : null;
+	if (split !== null && wrapSize !== null && (single === null || wrapSize > single)) return false;
+	if (single !== null && estimateWidthPx(label, single) <= TILE_MAX_TEXT_WIDTH) return false;
+	return true;
+}
+
+// Marquee scroll for the name, same mechanics as the caption's (see
+// paintBand): pixels moved per animation tick, gap between repeated copies.
+const NAME_SCROLL_PX_PER_TICK = 2;
+const NAME_LOOP_GAP = 32;
+const NAME_FONT = 26;
+const NAME_CLIP_HEIGHT = 40;
+
+function marqueeName(label: string, phase: number): string {
+	const baseline = NAME_TOP + Math.round(NAME_FONT * 0.82);
+	const width = estimateWidthPx(label, NAME_FONT);
+	const period = width + NAME_LOOP_GAP;
+	const offset = (phase * NAME_SCROLL_PX_PER_TICK) % period;
+	const clipId = `nm_${NAME_TOP}`;
+	return `
+		<defs>
+			<clipPath id="${clipId}">
+				<rect x="0" y="0" width="144" height="${NAME_CLIP_HEIGHT}"/>
+			</clipPath>
+		</defs>
+		<g clip-path="url(#${clipId})">
+			<text x="${-offset + 8}" y="${baseline}" text-anchor="start"
+			      font-family="${FONT_STACK}" font-size="${NAME_FONT}" font-weight="${NAME_WEIGHT}"
+			      fill="#ffffff">${esc(label)}</text>
+			<text x="${-offset + 8 + period}" y="${baseline}" text-anchor="start"
+			      font-family="${FONT_STACK}" font-size="${NAME_FONT}" font-weight="${NAME_WEIGHT}"
+			      fill="#ffffff">${esc(label)}</text>
+		</g>
+	`;
+}
+
+function paintName(label: string, phase: number): string {
 	const single = pickSingleLineSize(label);
 	const split = trySplitOnSeparator(label);
 	const wrapSize = split ? pickTwoLineSize(Math.max(split.top.length, split.bot.length)) : null;
@@ -200,14 +239,14 @@ function paintName(label: string): string {
 	if (split !== null && wrapSize !== null && (single === null || wrapSize > single)) {
 		return renderWrapped(split.top, split.bot, wrapSize);
 	}
-	if (single !== null) {
+	if (single !== null && estimateWidthPx(label, single) <= TILE_MAX_TEXT_WIDTH) {
 		const baseline = NAME_TOP + Math.round(single * 0.82);
 		return textLine(label, baseline, single);
 	}
-	// Very long label with no separator — force a midpoint split and use the
-	// smallest two-line tier.
-	const forced = forceSplit(label);
-	return renderWrapped(forced.top, forced.bot, pickTwoLineSize(Math.max(forced.top.length, forced.bot.length)));
+	// Doesn't fit on one line at a readable size, and no clean separator to
+	// wrap on — scroll it so the whole name is still readable, instead of
+	// squeezing letters together (textLength) or forcing a mid-word break.
+	return marqueeName(label, phase);
 }
 
 function renderWrapped(top: string, bot: string, size: number): string {
@@ -366,7 +405,7 @@ export function renderSession(session: Session, phase = 0, now = Date.now()): { 
 	const allowMarquee = session.state === "working";
 	const inner = `
 		<rect width="144" height="144" rx="12" fill="${t.bg}"/>
-		${paintName(session.label)}
+		${paintName(session.label, phase)}
 		${paintSalient(subtitle)}
 		${paintBand(caption, hint, bandColor, captionFg, phase, allowMarquee)}
 	`;

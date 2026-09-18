@@ -7,7 +7,7 @@ import streamDeck, {
 } from "@elgato/streamdeck";
 import type { JsonValue } from "@elgato/streamdeck";
 import { focusSession } from "../focus.js";
-import { ANIM_TICK_MS, brightnessFor, captionWillScroll, renderEmpty, renderSession, shouldAnimate } from "../render.js";
+import { ANIM_TICK_MS, brightnessFor, captionWillScroll, nameWillScroll, renderEmpty, renderSession, shouldAnimate } from "../render.js";
 import type { SessionStore } from "../state.js";
 import { installHooks, isInstalled, uninstallHooks } from "../install.js";
 
@@ -138,9 +138,11 @@ export class SessionAction extends SingletonAction<Settings> {
 	}
 
 	/** Periodic repaint for animating tiles.
-	 *  - Tiles with a scrolling caption MUST redraw every tick or the marquee
-	 *    freezes whenever brightness plateaus near a peak/valley.
-	 *  - Tiles with a static caption only redraw when brightness has moved
+	 *  - Tiles with a scrolling name and/or caption MUST redraw every tick or
+	 *    the marquee freezes whenever brightness plateaus near a peak/valley.
+	 *    This can fire even for states that don't otherwise animate (e.g. a
+	 *    long name on an `idle` tile) — `scrolling` overrides the state gate.
+	 *  - Tiles with nothing scrolling only redraw when brightness has moved
 	 *    enough to be visible, saving setImage traffic. */
 	private animationTick(): void {
 		if (!this.store) return;
@@ -149,10 +151,12 @@ export class SessionAction extends SingletonAction<Settings> {
 		const sessions = this.store.visible();
 		for (let i = 0; i < slots.length; i++) {
 			const s = sessions[i];
-			if (!s || !shouldAnimate(s.state)) continue;
+			if (!s) continue;
+			const scrolling = captionWillScroll(s) || nameWillScroll(s.label);
+			if (!shouldAnimate(s.state) && !scrolling) continue;
 			const slot = slots[i];
 			const brightness = brightnessFor(s.state, this.animPhase);
-			if (!captionWillScroll(s)) {
+			if (!scrolling) {
 				const last = this.lastBrightness.get(slot.id);
 				if (last !== undefined && Math.abs(last - brightness) < SessionAction.BRIGHTNESS_EPSILON) {
 					continue;
